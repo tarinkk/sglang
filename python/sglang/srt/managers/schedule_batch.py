@@ -467,6 +467,8 @@ class Req:
         # Prefix info
         # The indices to kv cache for the shared prefix.
         self.prefix_indices = []
+        # The local indices to kv cache for the shared prefix.
+        self.prefix_indices_local = []
         # Number of tokens to run prefill.
         self.extend_input_len = 0
         # The relative logprob_start_len in an extend batch
@@ -846,7 +848,17 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     def alloc_token_slots_local(self, num_tokens: int, backup_state: bool = False):
         # TODO backup_state
         out_cache_loc_local = self.token_to_kv_pool_allocator_local.alloc(num_tokens)
-        # if out_cache_loc is None:
+        if out_cache_loc_local is None:
+            phase_str = "Prefill" if self.forward_mode.is_extend() else "Decode"
+            error_msg = (
+                f"{phase_str} out of memory. Try to lower your batch size.\n"
+                f"Try to allocate {num_tokens} tokens.\n"
+                f"Avaliable tokens: {self.token_to_kv_pool_allocator.available_size() + self.tree_cache.evictable_size()}\n"
+            )
+            logger.error(error_msg)
+            if self.tree_cache is not None:
+                self.tree_cache.pretty_print()
+            raise RuntimeError(error_msg)
         return out_cache_loc_local
 
     def alloc_token_slots(self, num_tokens: int, backup_state: bool = False):
@@ -1065,8 +1077,26 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 )
                 if self.token_to_kv_pool_allocator_local is not None:
                     self.req_to_token_pool.write_local(
-                    (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices
-                )
+                        (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices_local
+                    )
+                    start_loc_local = self.req_to_token_pool.get_local_start_loc(
+                        req.req_pool_idx
+                    )
+                    if (
+                        pre_len
+                        > start_loc_local + 2 * self.model_config.attention_chunk_size
+                    ):
+                        last_loc_local = (
+                            prefix_lens - 1 - self.model_config.attention_chunk_size
+                        ).to(torch.int32)
+                        free_slots_local = self.req_to_token_pool.req_to_token_local[
+                            req.req_pool_idx, start_loc_local:last_loc_local
+                        ]
+                        self.token_to_kv_pool_allocator_local.free(free_slots_local)
+                        self.req_to_token_pool.write_local_start_loc(
+                            last_loc_local, req.req_pool_idx
+                        )
+                
 
             # If input_embeds are available, store them
             if req.input_embeds is not None:

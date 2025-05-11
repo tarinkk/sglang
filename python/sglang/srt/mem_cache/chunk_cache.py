@@ -57,6 +57,11 @@ class ChunkCache(BasePrefixCache):
 
         # `req.prefix_indices` will be used in `PrefillAdder::add_chunked_req` later
         req.prefix_indices = kv_indices
+        if self.token_to_kv_pool_allocator_local is not None:
+            kv_indices_local = self.req_to_token_pool.req_to_token_local[
+                req.req_pool_idx, : len(req.fill_ids)
+            ]
+            req.prefix_indices_local = kv_indices_local
 
     def insert(self):
         raise NotImplementedError()
