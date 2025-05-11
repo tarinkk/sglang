@@ -235,6 +235,9 @@ class CudaGraphRunner:
                 (self.max_bs,), self.seq_len_fill_value, dtype=torch.int32
             )
             self.out_cache_loc = torch.zeros((self.max_num_token,), dtype=torch.int64)
+            if self.model_runner.is_hybrid is not None:
+                self.out_cache_loc_local = torch.zeros((self.max_num_token,), dtype=torch.int64)
+                
             self.positions = torch.zeros((self.max_num_token,), dtype=torch.int64)
             self.mrope_positions = torch.zeros((3, self.max_bs), dtype=torch.int64)
 
@@ -394,8 +397,10 @@ class CudaGraphRunner:
         req_pool_indices = self.req_pool_indices[:bs]
         seq_lens = self.seq_lens[:bs]
         out_cache_loc = self.out_cache_loc[:num_tokens]
-        # TODO hybrid cache
-        out_cache_loc_local = None
+        if self.model_runner.is_hybrid is not None:
+            out_cache_loc_local =  self.out_cache_loc_local[:num_tokens]
+        else:
+            out_cache_loc_local = None
 
         positions = self.positions[:num_tokens]
         if self.is_encoder_decoder:

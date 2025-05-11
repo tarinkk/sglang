@@ -833,10 +833,6 @@ class ModelRunner:
                 raise RuntimeError(
                     "Invalid hybrid ratio. Please set --hybrid-ratio between 0 and 1."
                 )
-            if not self.server_args.disable_cuda_graph:
-                raise RuntimeError(
-                    "Hybrid cache does not support CUDA graph. Please set --disable-cuda-graph"
-                )
             if not self.server_args.disable_radix_cache:
                 raise RuntimeError(
                     "Hybrid cache does not support radix cache. Please set --disable-radix-cache"
