@@ -196,11 +196,6 @@ class TokenToKVPoolAllocator:
             self.free_slots = torch.cat((self.free_slots, free_index))
         else:
             self.free_group.append(free_index)
-        if torch.distributed.get_rank() == 0:
-            with open("log.txt", "a") as f:
-                f.write(
-                    f"free slots in TokentoKVPoolAllocator: {self.free_slots.tolist()},self.size: {self.size}\n"
-                )
 
     def free_group_begin(self):
         self.is_not_in_free_group = False

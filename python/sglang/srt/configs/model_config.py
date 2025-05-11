@@ -93,8 +93,6 @@ class ModelConfig:
             and self.hf_config.architectures[0] == "DeepseekV3ForCausalLM"
         ):
             self.hf_config.architectures[0] = "DeepseekV3ForCausalLMNextN"
-        with open("log.txt", "a") as f:
-            f.write(f"enable hybrid: {enable_hybrid_kvcache}\n")
 
         # Check model type
         self.is_hybrid = is_hybrid_model(
