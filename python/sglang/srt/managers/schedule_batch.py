@@ -1453,6 +1453,13 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             self.req_to_token_pool.write_local(
                 (self.req_pool_indices, locs), self.out_cache_loc_local.to(torch.int32)
             )
+            for i in range(len(self.req_pool_indices)):
+                start_loc_local = self.req_to_token_pool.get_local_start_loc(self.req_pool_indices[i])
+                if locs[i] > start_loc_local + 2 * self.model_config.attention_chunk_size:
+                    last_loc_local = (locs[i] - self.model_config.attention_chunk_size).to(torch.int32)
+                    free_slots_local = self.req_to_token_pool.req_to_token_local[self.req_pool_indices[i], start_loc_local:last_loc_local]
+                    self.token_to_kv_pool_allocator_local.free(free_slots_local)
+                    self.req_to_token_pool.write_local_start_loc(last_loc_local, self.req_pool_indices[i])
 
     def filter_batch(
         self,

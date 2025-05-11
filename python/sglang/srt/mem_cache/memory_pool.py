@@ -71,6 +71,9 @@ class ReqToTokenPool:
                 self.req_to_token_local = torch.zeros(
                     (size, max_context_len), dtype=torch.int32, device=device
                 )
+                self.local_start_loc = torch.zeros(
+                    size, dtype=torch.int32, device=device
+                )
             else:
                 self.req_to_token_local = None
         self.free_slots = list(range(size))
@@ -80,6 +83,12 @@ class ReqToTokenPool:
     
     def write_local(self, indices, values):
         self.req_to_token_local[indices] = values
+
+    def get_local_start_loc(self, idx):
+        return self.local_start_loc[idx]
+
+    def write_local_start_loc(self, start_loc, idx):
+        self.local_start_loc[idx] = start_loc 
 
     def available_size(self):
         return len(self.free_slots)
