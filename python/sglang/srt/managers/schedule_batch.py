@@ -473,6 +473,8 @@ class Req:
         self.prefix_indices = []
         # The local indices to kv cache for the shared prefix.
         self.prefix_indices_local = []
+        # For local attention chunked prefill
+        self.start_loc_local = 0
         # Number of tokens to run prefill.
         self.extend_input_len = 0
         # The relative logprob_start_len in an extend batch
@@ -870,7 +872,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 f"{num_reqs=}, "
             )
         return req_pool_indices
-    
+
     def alloc_token_slots_local(self, num_tokens: int, backup_state: bool = False):
         # TODO backup_state
         out_cache_loc_local = self.token_to_kv_pool_allocator_local.alloc(num_tokens)
@@ -1106,24 +1108,20 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                     self.req_to_token_pool.write_local(
                         (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices_local
                     )
-                    start_loc_local = self.req_to_token_pool.get_local_start_loc(
-                        req.req_pool_idx
-                    )
                     if (
                         pre_len
-                        > start_loc_local + 2 * self.model_config.attention_chunk_size
+                        > req.start_loc_local + self.model_config.attention_chunk_size
                     ):
                         last_loc_local = (
-                            prefix_lens - 1 - self.model_config.attention_chunk_size
-                        ).to(torch.int32)
+                            pre_len - 1 - self.model_config.attention_chunk_size
+                        )
                         free_slots_local = self.req_to_token_pool.req_to_token_local[
-                            req.req_pool_idx, start_loc_local:last_loc_local
+                            req.req_pool_idx, req.start_loc_local : last_loc_local
                         ]
                         self.token_to_kv_pool_allocator_local.free(free_slots_local)
                         self.req_to_token_pool.write_local_start_loc(
                             last_loc_local, req.req_pool_idx
                         )
-                
 
             # If input_embeds are available, store them
             if req.input_embeds is not None:
@@ -1264,7 +1262,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                     out_cache_loc_local,
                     self.req_to_token_pool.req_to_token_local.shape[1],
                 )
-                
+
         else:
             pt = 0
             for i in range(bs):
@@ -1274,8 +1272,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 )
                 if self.token_to_kv_pool_allocator_local is not None:
                     self.req_to_token_pool.write_local(
-                    (req_pool_indices[i], slice(prefix_lens[i], seq_lens[i])),
-                    out_cache_loc_local[pt : pt + extend_lens[i]],
+                        (req_pool_indices[i], slice(prefix_lens[i], seq_lens[i])),
+                        out_cache_loc_local[pt : pt + extend_lens[i]],
                     )
                 pt += extend_lens[i]
         if self.model_config.is_encoder_decoder:
@@ -1523,12 +1521,23 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 (self.req_pool_indices, locs), self.out_cache_loc_local.to(torch.int32)
             )
             for i in range(len(self.req_pool_indices)):
-                start_loc_local = self.req_to_token_pool.get_local_start_loc(self.req_pool_indices[i])
-                if locs[i] > start_loc_local + 2 * self.model_config.attention_chunk_size:
-                    last_loc_local = (locs[i] - self.model_config.attention_chunk_size).to(torch.int32)
-                    free_slots_local = self.req_to_token_pool.req_to_token_local[self.req_pool_indices[i], start_loc_local:last_loc_local]
+                start_loc_local = self.req_to_token_pool.get_local_start_loc(
+                    self.req_pool_indices[i]
+                )
+                if (
+                    locs[i]
+                    > start_loc_local + 2 * self.model_config.attention_chunk_size
+                ):
+                    last_loc_local = (
+                        locs[i] - self.model_config.attention_chunk_size
+                    ).to(torch.int32)
+                    free_slots_local = self.req_to_token_pool.req_to_token_local[
+                        self.req_pool_indices[i], start_loc_local:last_loc_local
+                    ]
                     self.token_to_kv_pool_allocator_local.free(free_slots_local)
-                    self.req_to_token_pool.write_local_start_loc(last_loc_local, self.req_pool_indices[i])
+                    self.req_to_token_pool.write_local_start_loc(
+                        last_loc_local, self.req_pool_indices[i]
+                    )
 
     def filter_batch(
         self,

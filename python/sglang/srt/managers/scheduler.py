@@ -485,9 +485,11 @@ class Scheduler(
         self.req_to_token_pool, self.token_to_kv_pool_allocator = (
             self.tp_worker.get_memory_pool()
         )
-        
+
         if self.tp_worker.worker.model_runner.is_hybrid is not None:
-            self.token_to_kv_pool_allocator_local = self.tp_worker.get_memory_pool_local()
+            self.token_to_kv_pool_allocator_local = (
+                self.tp_worker.get_memory_pool_local()
+            )
         else:
             self.token_to_kv_pool_allocator_local = None
         if (

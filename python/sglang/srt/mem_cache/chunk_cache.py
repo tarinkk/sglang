@@ -42,14 +42,17 @@ class ChunkCache(BasePrefixCache):
         kv_indices = self.req_to_token_pool.req_to_token[
             req.req_pool_idx, : len(req.origin_input_ids) + len(req.output_ids) - 1
         ]
-        self.req_to_token_pool.free(req.req_pool_idx)
         self.token_to_kv_pool_allocator.free(kv_indices)
         if self.token_to_kv_pool_allocator_local is not None:
-            start_loc_local = self.req_to_token_pool.get_local_start_loc(req.req_pool_idx) 
+            start_loc_local = self.req_to_token_pool.get_local_start_loc(
+                req.req_pool_idx
+            )
             kv_indices_local = self.req_to_token_pool.req_to_token_local[
-                req.req_pool_idx, : start_loc_local: len(req.origin_input_ids) + len(req.output_ids) - 1
+                req.req_pool_idx,
+                start_loc_local : len(req.origin_input_ids) + len(req.output_ids) - 1,
             ]
             self.token_to_kv_pool_allocator_local.free(kv_indices_local)
+        self.req_to_token_pool.free(req.req_pool_idx)
 
     def cache_unfinished_req(self, req: Req):
         # TODO: for hybrid cache
@@ -64,6 +67,9 @@ class ChunkCache(BasePrefixCache):
                 req.req_pool_idx, : len(req.fill_ids)
             ]
             req.prefix_indices_local = kv_indices_local
+            req.start_loc_local = self.req_to_token_pool.get_local_start_loc(
+                req.req_pool_idx
+            )
 
     def insert(self):
         raise NotImplementedError()
