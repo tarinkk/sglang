@@ -555,12 +555,18 @@ class CudaGraphRunner:
         if bs != raw_bs:
             self.seq_lens.fill_(1)
             self.out_cache_loc.zero_()
+            if self.model_runner.is_hybrid is not None:
+                self.out_cache_loc_local.zero_()
 
         # Common inputs
         self.input_ids[:raw_num_token].copy_(forward_batch.input_ids)
         self.req_pool_indices[:raw_bs].copy_(forward_batch.req_pool_indices)
         self.seq_lens[:raw_bs].copy_(forward_batch.seq_lens)
         self.out_cache_loc[:raw_num_token].copy_(forward_batch.out_cache_loc)
+        if self.model_runner.is_hybrid is not None:
+            self.out_cache_loc_local[:raw_num_token].copy_(
+                forward_batch.out_cache_loc_local
+            )
         self.positions[:raw_num_token].copy_(forward_batch.positions)
         if forward_batch.seq_lens_cpu is not None:
             if bs != raw_bs:
