@@ -1175,6 +1175,12 @@ class FlashAttentionBackend(AttentionBackend):
                 dtype=torch.int32,
                 device=self.device,
             ),
+            "page_table_local": torch.zeros(
+                max_bs,
+                (self.max_context_len + self.page_size - 1) // self.page_size,
+                dtype=torch.int32,
+                device=self.device,
+            ),
             "page_table_draft_decode": torch.zeros(
                 max_bs,
                 (self.max_context_len + self.page_size - 1) // self.page_size,
@@ -1397,6 +1403,8 @@ class FlashAttentionBackend(AttentionBackend):
                         ),
                         (1, 0),
                     )
+                    with open("log.txt", "a") as f:
+                        f.write("1\n")
                     metadata.page_table = self.decode_cuda_graph_metadata[
                         "page_table_draft_decode"
                     ][req_pool_indices, :]
@@ -1415,6 +1423,8 @@ class FlashAttentionBackend(AttentionBackend):
                     metadata.cu_seqlens_k = self.draft_decode_metadata_topk_normal[
                         "cu_seqlens_k"
                     ][: bs + 1]
+                    with open("log.txt", "a") as f:
+                        f.write("2\n")
                     metadata.page_table = self.draft_decode_metadata_topk_normal[
                         "page_table"
                     ][req_pool_indices, :]
@@ -1459,6 +1469,10 @@ class FlashAttentionBackend(AttentionBackend):
                 metadata.page_table = self.decode_cuda_graph_metadata["page_table"][
                     req_pool_indices, :
                 ]
+                if self.is_hybrid is not None:
+                    metadata.page_table_local = self.decode_cuda_graph_metadata["page_table_local"][
+                        req_pool_indices, :
+                    ]
                 # Precompute cumulative sequence lengths
                 metadata.cu_seqlens_q = torch.arange(
                     0, batch_size + 1, dtype=torch.int32, device=device
@@ -1505,7 +1519,8 @@ class FlashAttentionBackend(AttentionBackend):
                 metadata.cu_seqlens_k = self.target_verify_metadata["cu_seqlens_k"][
                     : (bs + 1)
                 ]
-
+                with open("log.txt", "a") as f:
+                    f.write("4\n")
                 metadata.page_table = self.target_verify_metadata["page_table"][
                     req_pool_indices, :
                 ]
@@ -1525,6 +1540,8 @@ class FlashAttentionBackend(AttentionBackend):
                 metadata.cu_seqlens_k = self.target_verify_metadata_topk_normal[
                     "cu_seqlens_k"
                 ][: bs + 1]
+                with open("log.txt", "a") as f:
+                    f.write("5\n")
                 metadata.page_table = self.target_verify_metadata_topk_normal[
                     "page_table"
                 ][req_pool_indices, :]
@@ -1617,6 +1634,8 @@ class FlashAttentionBackend(AttentionBackend):
                     ]
 
                     page_indices //= self.page_size
+                    with open("log.txt", "a") as f:
+                        f.write("6\n")
                     metadata.page_table[:, :max_seq_pages].copy_(page_indices)
                 else:
                     # When top k > 1, we need two specific draft decode metadata, and then merge states
@@ -1635,7 +1654,8 @@ class FlashAttentionBackend(AttentionBackend):
                     page_table = self.req_to_token[
                         req_pool_indices, : metadata.max_seq_len_k
                     ]
-
+                    with open("log.txt", "a") as f:
+                        f.write("7\n")
                     metadata.page_table[:, : metadata.max_seq_len_k].copy_(page_table)
 
                     # 2. The second half of metadata for draft tokens (per_batch_num_tokens = topk)
@@ -1670,8 +1690,20 @@ class FlashAttentionBackend(AttentionBackend):
                     ],
                 ]
                 page_indices //= self.page_size
+                with open("log.txt", "a") as f:
+                    f.write("8\n")
                 metadata.page_table[:, :max_seq_pages].copy_(page_indices)
                 metadata.page_table[:, max_seq_pages:].fill_(0)
+                if self.is_hybrid is not None:
+                    page_indices_local = self.req_to_token_local[
+                        req_pool_indices[:, None],
+                        self.decode_cuda_graph_metadata["strided_indices"][:max_seq_pages][
+                            None, :
+                        ],
+                    ]
+                    metadata.page_table_local[:, :max_seq_pages].copy_(page_indices_local)
+                    metadata.page_table_local[:, max_seq_pages:].fill_(0)
+
 
                 self._update_local_attn_metadata_for_replay(metadata, bs)
         elif forward_mode.is_target_verify():
@@ -1695,6 +1727,8 @@ class FlashAttentionBackend(AttentionBackend):
                     self.decode_cuda_graph_metadata["strided_indices"][:max_seq_pages],
                 ]
                 page_indices //= self.page_size
+                with open("log.txt", "a") as f:
+                    f.write("9\n")
                 metadata.page_table[:, :max_seq_pages].copy_(page_indices)
             else:
                 # When topk > 1, we need two specific target verify metadata, and then merge states
@@ -1710,6 +1744,8 @@ class FlashAttentionBackend(AttentionBackend):
                 page_table = self.req_to_token[
                     req_pool_indices, : metadata.max_seq_len_k
                 ]
+                with open("log.txt", "a") as f:
+                    f.write("10\n")
                 metadata.page_table[:, : metadata.max_seq_len_k].copy_(page_table)
 
                 # 2. The second half of metadata for draft tokens (per_batch_num_tokens = topk)
@@ -1793,6 +1829,8 @@ class FlashAttentionBackend(AttentionBackend):
                     metadata.encoder_max_seq_len_k + metadata.max_seq_len_k
                 ),
             ]
+            with open("log.txt", "a") as f:
+                f.write("11\n")
             metadata.page_table[:, : metadata.max_seq_len_k].copy_(page_table)
 
         self.forward_metadata = metadata
@@ -1874,7 +1912,10 @@ class FlashAttentionBackend(AttentionBackend):
         # Without this slicing, the pre-allocated page_table may contain zeros or invalid indices
         # beyond the actual sequence length, leading to incorrect attention calculations
         max_seq_len = int(seqlens.max().item())
-        sliced_page_table = metadata.page_table[:bs, :max_seq_len]
+        if self.is_hybrid is not None:
+            sliced_page_table = metadata.page_table[:bs, :max_seq_len]
+        else:
+            sliced_page_table = metadata.page_table_local[:bs, :max_seq_len]
 
         cu_seqlens_q_np = cu_seqlens_q.cpu().numpy()
         seqlens_np = seqlens.cpu().numpy()
